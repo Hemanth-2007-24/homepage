@@ -1,0 +1,106 @@
+<!-- FILENAME: admin.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - O4D</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        :root { --bg-color: #0d1117; --primary-color: #00f6ff; --text-color: #c9d1d9; --text-muted: #8b949e; --card-bg: rgba(22, 27, 34, 0.65); --card-border: rgba(48, 54, 61, 0.8); }
+        body { font-family: 'Poppins', sans-serif; background-color: var(--bg-color); color: var(--text-color); line-height: 1.6; }
+        .page-container { max-width: 1300px; margin: 0 auto; padding: 2rem; }
+        .section-title { text-align: center; font-size: 3rem; color: var(--text-color); margin-bottom: 3rem; font-weight: 600; }
+        .section-title span { color: var(--primary-color); }
+        .user-table { width: 100%; border-collapse: collapse; background: var(--card-bg); border-radius: 12px; overflow: hidden; }
+        .user-table th, .user-table td { padding: 1rem 1.5rem; text-align: left; border-bottom: 1px solid var(--card-border); }
+        .user-table th { background-color: rgba(0, 246, 255, 0.1); color: var(--primary-color); font-weight: 600; }
+        .user-table tr:last-child td { border-bottom: none; }
+        .user-table td { color: var(--text-muted); }
+        .user-table td strong { color: var(--text-color); }
+        .loading, .error-msg { text-align: center; font-size: 1.2rem; padding: 3rem; color: var(--text-muted); }
+        a.back-link { color: var(--primary-color); text-decoration: none; display: inline-block; margin-bottom: 2rem;}
+    </style>
+</head>
+<body>
+    <div class="page-container">
+        <a href="/profile.html" class="back-link">← Back to Profile</a>
+        <h1 class="section-title">Admin <span>Dashboard</span></h1>
+        <div id="dashboard-content">
+            <p class="loading">Loading user data...</p>
+        </div>
+    </div>
+
+    <script>
+        // Function to get a cookie by name
+        function getCookie(name) {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+        }
+
+        async function fetchUsers() {
+            const contentDiv = document.getElementById('dashboard-content');
+            const token = getCookie('authToken');
+
+            if (!token) {
+                window.location.href = '/index.html#auth';
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/users', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (response.status === 401 || response.status === 403) {
+                    contentDiv.innerHTML = `<p class="error-msg">Unauthorized. You do not have permission to view this page. Redirecting...</p>`;
+                    setTimeout(() => window.location.href = '/index.html#auth', 2000);
+                    return;
+                }
+
+                if (!response.ok) {
+                    throw new Error('Failed to fetch user data.');
+                }
+
+                const users = await response.json();
+                
+                let tableHtml = `
+                    <table class="user-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Name</th>
+                                <th>Email</th>
+                                <th>Provider</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                users.forEach(user => {
+                    tableHtml += `
+                        <tr>
+                            <td>${user.id}</td>
+                            <td><strong>${user.name}</strong></td>
+                            <td>${user.email}</td>
+                            <td>${user.provider}</td>
+                        </tr>
+                    `;
+                });
+
+                tableHtml += `</tbody></table>`;
+                contentDiv.innerHTML = tableHtml;
+
+            } catch (error) {
+                console.error('Error fetching users:', error);
+                contentDiv.innerHTML = `<p class="error-msg">${error.message}</p>`;
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', fetchUsers);
+    </script>
+</body>
+</html>
