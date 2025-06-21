@@ -1,34 +1,36 @@
-// FILENAME: api/users.js
-import { parse } from 'cookie';
-import { db } from './_db.js';
-import { verifyToken } from './_utils.js';
+// FILENAME: /api/users.js
 
-export default async function handler(req, res) {
-    // 1. Get token from cookies or Authorization header
-    let token;
-    const cookies = parse(req.headers.cookie || '');
-    if (cookies.authToken) {
-        token = cookies.authToken;
-    } else if (req.headers.authorization) {
-        token = req.headers.authorization.split(' ')[1];
+const jwt = require('jsonwebtoken');
+const { users, JWT_SECRET } = require('./_data');
+
+module.exports = async (req, res) => {
+    if (req.method !== 'GET') {
+        return res.status(405).json({ message: 'Method Not Allowed' });
     }
 
-    if (!token) {
-        return res.status(401).json({ message: 'Authentication required.' });
-    }
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return res.status(401).json({ message: 'Unauthorized: No token provided.' });
+        }
 
-    // 2. Verify the token
-    const payload = verifyToken(token);
-    if (!payload) {
-        return res.status(401).json({ message: 'Invalid or expired token.' });
-    }
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, JWT_SECRET);
 
-    // 3. Check if the user is an admin
-    if (payload.role !== 'admin') {
-        return res.status(403).json({ message: 'Forbidden. Admin access required.' });
-    }
+        if (decoded.role !== 'admin') {
+            return res.status(403).json({ message: 'Forbidden: You do not have admin privileges.' });
+        }
 
-    // 4. Return all users (excluding sensitive data like password hashes)
-    const allUsers = db.users.getAll().map(({ passwordHash, ...user }) => user);
-    res.status(200).json(allUsers);
-}
+        // Return all users, but without their password hashes
+        const safeUsers = users.map(u => ({ id: u.id, name: u.name, email: u.email, provider: u.provider }));
+        
+        return res.status(200).json(safeUsers);
+
+    } catch (error) {
+        if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
+            return res.status(401).json({ message: 'Unauthorized: Invalid token.' });
+        }
+        console.error('FETCH USERS ERROR:', error);
+        return res.status(500).json({ message: 'A server error occurred.' });
+    }
+};
