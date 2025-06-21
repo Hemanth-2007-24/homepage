@@ -1,62 +1,58 @@
-// FILENAME: api/auth/facebook.js
-import axios from 'axios';
-import { db } from '../_db.js';
-import { issueToken, setAuthCookie } from '../_utils.js';
+// FILENAME: /api/auth/facebook.js
 
-const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID;
-const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET;
+const axios = require('axios');
+const jwt = require('jsonwebtoken');
+const cookie = require('cookie');
+const { findUserByEmail, createUser, JWT_SECRET } = require('../_data');
 
-export default async function handler(req, res) {
+// Add these to your Vercel Environment Variables
+const FB_APP_ID = process.env.FB_APP_ID || '2084193538757104';
+const FB_APP_SECRET = process.env.FB_APP_SECRET; // YOU MUST SET THIS IN VERCEL
+
+module.exports = async (req, res) => {
     if (req.method !== 'POST') {
         return res.status(405).json({ message: 'Method Not Allowed' });
     }
-    
-    const { token: userAccessToken } = req.body;
-
-    if (!userAccessToken) {
-        return res.status(400).json({ message: 'Facebook token is required.' });
-    }
 
     try {
-        // Step 1: Verify the user access token is valid and belongs to our app.
-        // We could use the debug_token endpoint, but getting user profile is more direct.
+        const { token } = req.body;
         
-        // Step 2: Use the token to get the user's profile from Facebook.
-        const { data: profile } = await axios.get(
-            `https://graph.facebook.com/me?fields=id,name,email&access_token=${userAccessToken}`
-        );
+        if (!FB_APP_SECRET) {
+            throw new Error('Facebook App Secret is not configured on the server.');
+        }
 
-        const { id: facebookId, name, email } = profile;
+        // Verify the token with Facebook
+        const { data } = await axios.get(`https://graph.facebook.com/me`, {
+            params: {
+                fields: 'id,name,email',
+                access_token: token,
+            },
+        });
 
+        const { name, email } = data;
         if (!email) {
-            return res.status(400).json({ message: 'Could not retrieve email from Facebook. Please ensure you have granted email permissions.' });
+            return res.status(400).json({ message: 'Email permission is required from Facebook.' });
         }
-
-        // Step 3: Find or create a user in our database.
-        let user = db.users.findOne(u => u.email === email);
-
+        
+        let user = findUserByEmail(email);
         if (!user) {
-            // User doesn't exist, create a new one.
-            user = db.users.create({
-                name,
-                email,
-                provider: 'facebook',
-                providerId: facebookId
-            });
-        } else if (user.provider !== 'facebook') {
-            // User exists but signed up with a different method (e.g., Google or manual).
-            return res.status(409).json({ message: `This email is already registered with ${user.provider}. Please log in using that method.` });
+            user = createUser({ name, email, provider: 'facebook' });
         }
 
-        // Step 4: Issue our own JWT and set it as an HTTPOnly cookie.
-        const jwtToken = issueToken(user);
-        setAuthCookie(res, jwtToken);
+        const authToken = jwt.sign({ userId: user.id, name: user.name, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '1d' });
 
-        res.status(200).json({ success: true });
+        res.setHeader('Set-Cookie', cookie.serialize('authToken', authToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV !== 'development',
+            maxAge: 60 * 60 * 24,
+            path: '/',
+            sameSite: 'Lax',
+        }));
+
+        return res.status(200).json({ message: 'Facebook login successful!' });
 
     } catch (error) {
-        console.error('Facebook Auth Error:', error.response ? error.response.data.error : error.message);
-        const errorMessage = error.response?.data?.error?.message || 'Internal server error during Facebook authentication.';
-        res.status(500).json({ message: errorMessage });
+        console.error('FACEBOOK AUTH ERROR:', error.response ? error.response.data : error.message);
+        return res.status(500).json({ message: 'Facebook authentication failed.' });
     }
-}
+};
