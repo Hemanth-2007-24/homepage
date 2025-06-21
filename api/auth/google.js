@@ -1,15 +1,35 @@
 // FILENAME: /api/auth/google.js
+import { OAuth2Client } from 'google-auth-library';
+import jwt from 'jsonwebtoken';
+import cookie from 'cookie';
+import { supabase } from '../_supabase.js';
 
-const { OAuth2Client } = require('google-auth-library');
-const jwt = require('jsonwebtoken');
-const cookie = require('cookie');
-const { findUserByEmail, createUser, JWT_SECRET } = require('../_data');
-
-// Put your Google Client ID in Vercel Environment Variables
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '772260889913-3vlll8sbp620c05sg9rfhbmmuh1b8na8.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const JWT_SECRET = process.env.JWT_SECRET;
 const client = new OAuth2Client(GOOGLE_CLIENT_ID);
 
-module.exports = async (req, res) => {
+async function getOrCreateUser(profile) {
+    const { data: user, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('email', profile.email)
+        .single();
+    
+    if (error && error.code !== 'PGRST116') throw error;
+    if (user) return user;
+
+    // Create a new user if one doesn't exist
+    const { data: newUser, error: insertError } = await supabase
+        .from('users')
+        .insert({ name: profile.name, email: profile.email, provider: 'google' })
+        .select()
+        .single();
+    
+    if (insertError) throw insertError;
+    return newUser;
+}
+
+export default async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(405).json({ message: 'Method Not Allowed' });
     }
@@ -20,13 +40,9 @@ module.exports = async (req, res) => {
             idToken,
             audience: GOOGLE_CLIENT_ID,
         });
-        const payload = ticket.getPayload();
-        const { name, email } = payload;
+        const profile = ticket.getPayload();
 
-        let user = findUserByEmail(email);
-        if (!user) {
-            user = createUser({ name, email, provider: 'google' });
-        }
+        const user = await getOrCreateUser(profile);
 
         const authToken = jwt.sign({ userId: user.id, name: user.name, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '1d' });
 
@@ -44,4 +60,4 @@ module.exports = async (req, res) => {
         console.error('GOOGLE AUTH ERROR:', error);
         return res.status(500).json({ message: 'Google authentication failed.' });
     }
-};
+}
