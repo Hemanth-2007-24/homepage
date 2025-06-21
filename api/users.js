@@ -1,9 +1,10 @@
 // FILENAME: /api/users.js
+import jwt from 'jsonwebtoken';
+import { supabase } from './_supabase.js';
 
-const jwt = require('jsonwebtoken');
-const { users, JWT_SECRET } = require('./_data');
+const JWT_SECRET = process.env.JWT_SECRET;
 
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
     if (req.method !== 'GET') {
         return res.status(405).json({ message: 'Method Not Allowed' });
     }
@@ -21,10 +22,13 @@ module.exports = async (req, res) => {
             return res.status(403).json({ message: 'Forbidden: You do not have admin privileges.' });
         }
 
-        // Return all users, but without their password hashes
-        const safeUsers = users.map(u => ({ id: u.id, name: u.name, email: u.email, provider: u.provider }));
+        const { data: users, error } = await supabase
+            .from('users')
+            .select('id, name, email, provider, role'); // Select only safe fields
+
+        if (error) throw error;
         
-        return res.status(200).json(safeUsers);
+        return res.status(200).json(users);
 
     } catch (error) {
         if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
@@ -33,4 +37,4 @@ module.exports = async (req, res) => {
         console.error('FETCH USERS ERROR:', error);
         return res.status(500).json({ message: 'A server error occurred.' });
     }
-};
+}
